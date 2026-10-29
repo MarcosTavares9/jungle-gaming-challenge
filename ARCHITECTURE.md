@@ -18,7 +18,7 @@ Não há arredondamento no fluxo: valores com mais de duas casas são rejeitados
 
 ## Concorrência
 
-A unidade de serialização é uma linha de `wallets`. O lock é adquirido antes de decidir idempotência e aplicar a movimentação. Instâncias diferentes disputam o mesmo lock no PostgreSQL; carteiras diferentes usam linhas distintas. Não há lock global nem dependência de estado em memória.
+A unidade de serialização financeira é uma linha de `wallets`. Primeiro a operação consulta a idempotência persistida e, quando é nova, reserva a identidade pelos índices únicos da transação. Somente a execução que criou essa reserva adquire o lock da carteira para aplicar a movimentação. Replays esperam o commit da identidade concorrente ou leem seu resultado já confirmado, sem disputar o lock da carteira entre si. Instâncias diferentes continuam serializando movimentações distintas da mesma carteira no PostgreSQL; carteiras diferentes usam linhas distintas. Não há lock global nem dependência de estado em memória.
 
 Escolhi lock pessimista por ser simples de inspecionar e por evitar ciclos de cálculo especulativo em carteiras disputadas. A transação tem `lock_timeout` de cinco segundos. HTTP devolve erro transitório e a fila tenta novamente quando o lock não fica disponível. A versão começa em 1 e só incrementa quando o saldo muda.
 
@@ -62,23 +62,32 @@ Se a referência estiver ausente ou ainda pendente, a operação é persistida c
 
 Há 12 tentativas posteriores ao aceite, com espera inicial de 1 segundo, dobrando até 60 segundos. O prazo acumulado é de aproximadamente sete minutos, mais tempo de execução/indisponibilidade. Limite e intervalo são configuráveis. Uma referência terminal rejeitada falha imediatamente; referência ainda ausente no limite gera `REFERENCE_NOT_FOUND`.
 
-| Código                        | Significado                                           |
-| ----------------------------- | ----------------------------------------------------- |
-| `INSUFFICIENT_FUNDS`          | BET sem saldo                                         |
-| `REVERSAL_INSUFFICIENT_FUNDS` | ROLLBACK de crédito produziria saldo negativo         |
-| `CURRENCY_MISMATCH`           | Moeda incompatível                                    |
-| `REFERENCE_NOT_FOUND`         | Referência indisponível após o limite                 |
-| `REFERENCE_REJECTED`          | Referência terminou sem ser processada                |
-| `REFERENCE_MISMATCH`          | Identidade ou rodada incompatível                     |
-| `INVALID_REFERENCE_KIND`      | Tipo de referência não permitido                      |
-| `REVERSAL_AMOUNT_MISMATCH`    | Tentativa de reversão parcial ou valor diferente      |
-| `ALREADY_REVERSED`            | Referência já revertida pelo mesmo tipo               |
-| `WALLET_NOT_FOUND`            | Carteira da operação inexistente                      |
-| `PLAYER_MISMATCH`             | Jogador não é dono da carteira                        |
-| `BALANCE_LIMIT_EXCEEDED`      | Crédito ultrapassaria a capacidade do saldo           |
-| `INFRASTRUCTURE_PERMANENT`    | Reservado ao estado FAILED em recuperação operacional |
+| Código                        | Significado                                      |
+| ----------------------------- | ------------------------------------------------ |
+| `INSUFFICIENT_FUNDS`          | BET sem saldo                                    |
+| `REVERSAL_INSUFFICIENT_FUNDS` | ROLLBACK de crédito produziria saldo negativo    |
+| `CURRENCY_MISMATCH`           | Moeda incompatível                               |
+| `REFERENCE_NOT_FOUND`         | Referência indisponível após o limite            |
+| `REFERENCE_REJECTED`          | Referência terminou sem ser processada           |
+| `REFERENCE_MISMATCH`          | Identidade ou rodada incompatível                |
+| `INVALID_REFERENCE_KIND`      | Tipo de referência não permitido                 |
+| `REVERSAL_AMOUNT_MISMATCH`    | Tentativa de reversão parcial ou valor diferente |
+| `ALREADY_REVERSED`            | Referência já revertida pelo mesmo tipo          |
+| `WALLET_NOT_FOUND`            | Carteira da operação inexistente                 |
+| `PLAYER_MISMATCH`             | Jogador não é dono da carteira                   |
+| `BALANCE_LIMIT_EXCEEDED`      | Crédito ultrapassaria a capacidade do saldo      |
+| `INFRASTRUCTURE_PERMANENT`    | Erro técnico não recuperável sem intervenção     |
+| `RETRY_EXHAUSTED`             | Limite de tentativas técnicas atingido           |
 
-`FAILED` não é usado como destino automático de falhas transitórias: sem banco disponível não seria possível gravá-lo com segurança. Mensagens que esgotam tentativas ficam auditáveis na DLQ; reenvio operacional preserva os identificadores originais.
+Falhas de conexão, timeout de lock, deadlock e serialização continuam transitórias. Erros SQL de sintaxe, permissão, integridade ou recurso não suportado são permanentes. Uma falha técnica permanente, ou a quinta tentativa sem sucesso, chama `recordPermanentFailure`: persiste `FAILED`, inbox, evento `WagerTransactionFailed` e intenção de entrega à DLQ atomicamente. Não há lançamento nem mudança de saldo. O índice de identidade externa decide disputas entre esse caminho e o processamento financeiro; um resultado já confirmado nunca é sobrescrito por uma falha posterior de transporte.
+
+A outbox tem destinos `events` e `dlq`. Intenções DLQ guardam o corpo original e a identidade da entrega; um índice parcial impede intenções duplicadas para a mesma entrega. O ack do comando depende do commit dessa intenção, sem depender de uma chamada imediata ao SQS. O publisher publica depois e mantém retry persistente. Reverter essa migration exige publicar primeiro intenções DLQ pendentes.
+
+Se o banco permanecer indisponível até o redrive nativo, não é possível gravar `FAILED` naquele momento. O envelope continua auditável na DLQ. Após o retorno do banco, o comando `dlq:audit` persiste a falha para mensagens válidas ainda sem resultado, sem substituir operações processadas. Payloads inválidos e conflitos não recebem transações financeiras artificiais.
+
+A auditoria arquiva o corpo original em `dlq_archive` antes de remover a entrega do SQS. Esse ack permite avançar na cabeça do grupo FIFO em execuções posteriores; devolver sempre o mesmo lote à visibilidade impediria alcançar a 11ª mensagem. O arquivo tem identidade única por fila/MessageId, hash SHA-256 do corpo exato e proteção contra UPDATE, DELETE e TRUNCATE. Resultados `AUDITED`, `INVALID_PAYLOAD` e `CONFLICT` preservam os envelopes e a classificação para análise operacional.
+
+O registro financeiro e o arquivo usam commits separados, mas o ack depende da conclusão de ambos. Uma queda entre os commits mantém a mensagem na DLQ; a retomada reutiliza a transação existente e completa o arquivo. Uma queda depois do arquivo e antes do ack reutiliza o registro de arquivo, sem duplicar histórico nem efeito financeiro. Erros técnicos interrompem o lote com exit code 1 e devolvem à visibilidade as mensagens ainda não confirmadas. Somente erros esperados de payload/conflito são classificados e arquivados como tal. Reverter a migration de arquivo remove esse histórico e exige exportação prévia quando houver dados.
 
 ## Eventos e recuperação
 
@@ -94,7 +103,7 @@ No SIGTERM, o processo interrompe long polling, deixa de selecionar trabalho e a
 
 ## Observabilidade e reconciliação
 
-Logs JSON carregam contexto de processamento e códigos estáveis, sem payloads financeiros completos. As métricas usam labels de baixa cardinalidade, sem walletId ou transactionId como label. Cada instância expõe seu próprio `/metrics`.
+Logs JSON carregam contexto de processamento e códigos estáveis, sem payloads financeiros completos. Correlação HTTP é atribuída uma vez e devolvida no header. Transações persistem correlação e causa para referências retomadas depois. Retry, DLQ, publicação e shutdown carregam identificadores disponíveis; campos desconhecidos ficam explicitamente nulos. Logs de publicação recuperam o provedor pela transação, e logs do driver são normalizados sem expor SQL ou parâmetros. As métricas usam labels de baixa cardinalidade, sem walletId ou transactionId como label. Cada instância expõe seu próprio `/metrics`.
 
 Reconciliação lê carteira e soma do ledger em uma única instrução SQL, usando o mesmo snapshot MVCC. Diferença não é corrigida: retorna `consistent: false`, gera log e incrementa contador. Liveness não depende da infraestrutura; readiness consulta banco e filas.
 
@@ -110,4 +119,4 @@ Os unitários cobrem o domínio sem dependências de infraestrutura. A integraç
 
 Falhas de escrita são provocadas por triggers temporárias no banco de testes: uma falha ao inserir inbox ou outbox precisa desfazer também o débito e o ledger. Timeouts de lock usam uma transação concorrente segurando a carteira, exercitando retry HTTP/SQS e esgotamento de tentativas. Nos testes de queda, o processo realmente encerra depois do commit ou depois da publicação; a retomada usa os registros persistidos e o redelivery real do broker.
 
-A soma do ledger e a correspondência entre transação e lançamento são verificadas após cada caso de integração. A suíte cobre encerramento do worker durante long polling. O teste de encerramento chama `Workers.stop()` diretamente, sem afirmar cobertura do sinal SIGTERM do sistema operacional no Windows. Não há benchmark de carga, dashboard ou tracing distribuído neste escopo.
+A soma do ledger e a correspondência entre transação e lançamento são verificadas após cada caso de integração e resiliência. Além do encerramento durante long polling, uma stack Compose separada executa três containers Linux e recebe SIGTERM com mensagem em andamento: o processamento iniciado termina, mensagens restantes voltam à visibilidade e outra instância assume após a retomada. O teste também para e reinicia PostgreSQL preservando seu volume, e pausa SQS para comprovar persistência, backoff e publicação da outbox após recuperação. Portas publicadas são redescobertas após reinícios. Não há benchmark de carga, dashboard ou tracing distribuído neste escopo.

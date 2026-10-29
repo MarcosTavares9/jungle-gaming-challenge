@@ -14,6 +14,7 @@ import {
   WagerTransactionPendingReference,
   WagerTransactionProcessed,
   WagerTransactionRejected,
+  WagerTransactionFailed,
   type EventContext,
   type IntegrationEvent,
 } from "../domain/events";
@@ -48,6 +49,8 @@ export interface TransactionRow {
   next_attempt_at: Date | null;
   created_at: Date;
   processed_at: Date | null;
+  correlation_id: string | null;
+  causation_id: string | null;
 }
 export interface ProcessContext extends EventContext {
   inbox?: { messageId: string; hash: string };
@@ -185,11 +188,6 @@ export class Processor {
         const sql = new Sql(em);
         await sql.query(`SET LOCAL lock_timeout = '5s'`);
         const hash = payloadHash(input);
-        const record = await em.findOne(
-          WalletRecord,
-          { id: input.walletId },
-          { lockMode: LockMode.PESSIMISTIC_WRITE },
-        );
         const existing = await sql.query<TransactionRow>(
           `SELECT * FROM wager_transactions
           WHERE idempotency_key = ? OR (provider_id = ? AND external_transaction_id = ?)`,
@@ -204,8 +202,8 @@ export class Processor {
         const inserted = await sql.query<{ id: string }>(
           `INSERT INTO wager_transactions
           (id,provider_id,external_transaction_id,idempotency_key,payload_hash,wallet_id,player_id,round_id,game_id,kind,
-           amount,currency,reference_external_transaction_id,status)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING') ON CONFLICT DO NOTHING RETURNING id`,
+           amount,currency,reference_external_transaction_id,status,correlation_id,causation_id)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?) ON CONFLICT DO NOTHING RETURNING id`,
           [
             id,
             input.providerId,
@@ -220,9 +218,12 @@ export class Processor {
             input.money.amount,
             input.money.currency,
             input.referenceExternalTransactionId ?? null,
+            context.correlationId,
+            context.causationId ?? null,
           ],
         );
-        // A conflicting request for another wallet may have committed while the unique index blocked us.
+        // The unique index serializes the operation identity before any wallet lock.
+        // Replays never queue behind other replays on the wallet row.
         if (!inserted.length) {
           const rows = await sql.query<TransactionRow>(
             `SELECT * FROM wager_transactions
@@ -233,6 +234,11 @@ export class Processor {
           await this.inbox(sql, row.id, context);
           return { ...row.result!, idempotentReplay: true };
         }
+        const record = await em.findOne(
+          WalletRecord,
+          { id: input.walletId },
+          { lockMode: LockMode.PESSIMISTIC_WRITE },
+        );
         const tx = WagerTransaction.create({
           ...input,
           id,
@@ -301,16 +307,153 @@ export class Processor {
           sql,
           domainTransaction(row),
           record,
-          { correlationId: row.id },
+          {
+            correlationId: row.correlation_id ?? row.id,
+            causationId: row.causation_id ?? undefined,
+          },
           row.attempts + 1,
         );
         metrics.retries.inc({ worker: "reference" });
         if (result.status !== "PENDING_REFERENCE")
           metrics.transactions.inc({ status: result.status });
+        log("info", "reference_retry_result", {
+          correlationId: row.correlation_id ?? row.id,
+          messageId: row.causation_id,
+          transactionId: row.id,
+          walletId: row.wallet_id,
+          providerId: row.provider_id,
+          status: result.status,
+          failureCode: result.failureCode,
+          attempts: row.attempts + 1,
+        });
         processed += 1;
       });
     }
     return processed;
+  }
+
+  async recordPermanentFailure(
+    input: WagerInput,
+    idempotencyKey: string,
+    context: ProcessContext,
+    failureCode: "INFRASTRUCTURE_PERMANENT" | "RETRY_EXHAUSTED",
+    delivery: {
+      body: string;
+      messageId: string;
+      alreadyDeadLettered?: boolean;
+    },
+  ): Promise<TransactionResult> {
+    const result = await this.db.em.fork().transactional(async (em) => {
+      const sql = new Sql(em);
+      await sql.query(`SET LOCAL lock_timeout = '5s'`);
+      const id = crypto.randomUUID();
+      const hash = payloadHash(input);
+      const created = await sql.query<{ id: string }>(
+        `INSERT INTO wager_transactions
+        (id,provider_id,external_transaction_id,idempotency_key,payload_hash,wallet_id,player_id,round_id,game_id,kind,
+         amount,currency,reference_external_transaction_id,status,correlation_id,causation_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?) ON CONFLICT DO NOTHING RETURNING id`,
+        [
+          id,
+          input.providerId,
+          input.externalTransactionId,
+          idempotencyKey,
+          hash,
+          input.walletId,
+          input.playerId,
+          input.roundId,
+          input.gameId,
+          input.kind,
+          input.money.amount,
+          input.money.currency,
+          input.referenceExternalTransactionId ?? null,
+          context.correlationId,
+          context.causationId ?? null,
+        ],
+      );
+      let result: TransactionResult;
+      if (created.length) {
+        const tx = WagerTransaction.create({
+          ...input,
+          id,
+          idempotencyKey,
+          payloadHash: hash,
+          money: Money.from(input.money),
+          createdAt: new Date(),
+        });
+        tx.fail(failureCode);
+        result = {
+          transactionId: id,
+          status: tx.status,
+          failureCode: tx.failureCode,
+          idempotentReplay: false,
+        };
+        await sql.query(
+          `UPDATE wager_transactions SET status='FAILED',failure_code=?,processed_at=?,result=?::jsonb WHERE id=?`,
+          [failureCode, tx.processedAt, JSON.stringify(result), id],
+        );
+        await this.enqueue(
+          sql,
+          WagerTransactionFailed.from({
+            eventId: crypto.randomUUID(),
+            aggregateId: input.walletId,
+            ...context,
+            occurredAt: new Date(),
+            data: {
+              transactionId: id,
+              walletId: input.walletId,
+              providerId: input.providerId,
+              status: "FAILED",
+              failureCode,
+            },
+          }),
+        );
+      } else {
+        const rows = await sql.query<TransactionRow>(
+          `SELECT * FROM wager_transactions
+          WHERE idempotency_key=? OR (provider_id=? AND external_transaction_id=?) FOR UPDATE`,
+          [idempotencyKey, input.providerId, input.externalTransactionId],
+        );
+        const existing = this.checkReplay(rows, idempotencyKey, hash);
+        // A transport failure must never replace a financial result that another instance committed.
+        result = { ...existing.result!, idempotentReplay: true };
+      }
+      await this.inbox(sql, result.transactionId, context);
+      if (result.status === "FAILED" && !delivery.alreadyDeadLettered) {
+        await sql.query(
+          `INSERT INTO outbox (id,aggregate_id,event_type,payload,occurred_at,destination)
+          VALUES (?,?,'WagerMessageDeadLetterRequested',?::jsonb,now(),'dlq') ON CONFLICT DO NOTHING`,
+          [
+            crypto.randomUUID(),
+            input.walletId,
+            JSON.stringify({
+              body: delivery.body,
+              deduplicationId: delivery.messageId,
+              correlationId: context.correlationId,
+              messageId: context.inbox?.messageId ?? null,
+              transactionId: result.transactionId,
+              walletId: input.walletId,
+              providerId: input.providerId,
+              failureCode: result.failureCode,
+            }),
+          ],
+        );
+      }
+      return result;
+    });
+    if (!result.idempotentReplay)
+      metrics.transactions.inc({ status: result.status });
+    log("error", "transaction_failure_recorded", {
+      correlationId: context.correlationId,
+      messageId: context.inbox?.messageId,
+      transactionId: result.transactionId,
+      walletId: input.walletId,
+      providerId: input.providerId,
+      status: result.status,
+      failureCode: result.failureCode,
+      idempotentReplay: result.idempotentReplay,
+    });
+    return result;
   }
 
   private checkReplay(

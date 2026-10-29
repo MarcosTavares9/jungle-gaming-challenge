@@ -11,7 +11,8 @@ export type FailureCode =
   | "WALLET_NOT_FOUND"
   | "PLAYER_MISMATCH"
   | "BALANCE_LIMIT_EXCEEDED"
-  | "INFRASTRUCTURE_PERMANENT";
+  | "INFRASTRUCTURE_PERMANENT"
+  | "RETRY_EXHAUSTED";
 
 export class DomainError extends Error {
   constructor(

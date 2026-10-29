@@ -6,13 +6,18 @@ import {
   type Message,
 } from "@aws-sdk/client-sqs";
 import { ZodError } from "zod";
-import { messageSchema, payloadHash } from "../application/contracts";
+import {
+  messageSchema,
+  payloadHash,
+  type WagerInput,
+} from "../application/contracts";
 import { Processor } from "../application/processor";
 import { ConflictError, DomainError } from "../domain/errors";
 import { OutboxMessage } from "../domain/events";
 import { type Database, Sql } from "./database";
 import { errorCode, log, metrics } from "./telemetry";
 import { Queues, queueNames } from "./queues";
+import { isPermanentInfrastructureError } from "./failures";
 
 export class Workers {
   private stopping = false;
@@ -36,8 +41,10 @@ export class Workers {
   }
   async stop() {
     this.stopping = true;
+    log("info", "worker_stopping");
     this.abortReceive.abort();
     await Promise.allSettled(this.jobs);
+    log("info", "worker_stopped");
   }
   private async loop(name: string, work: () => Promise<unknown>, delay = 100) {
     while (!this.stopping) {
@@ -54,7 +61,6 @@ export class Workers {
     }
   }
   async publish(): Promise<number> {
-    const queueUrl = await this.queues.url(queueNames.events);
     return this.db.em.fork().transactional(async (em) => {
       const sql = new Sql(em);
       const rows = await sql.query<{
@@ -65,12 +71,25 @@ export class Workers {
         occurred_at: Date;
         attempts: number;
         next_attempt_at: Date;
+        destination: "events" | "dlq";
+        provider_id: string | null;
       }>(
-        `SELECT * FROM outbox WHERE published_at IS NULL AND next_attempt_at <= now() ORDER BY occurred_at,id LIMIT 10 FOR UPDATE SKIP LOCKED`,
+        `SELECT o.*,t.provider_id FROM outbox o LEFT JOIN wager_transactions t
+          ON t.id=COALESCE(o.payload->'data'->>'transactionId',o.payload->>'transactionId')::uuid
+         WHERE o.published_at IS NULL AND o.next_attempt_at <= now()
+         ORDER BY o.occurred_at,o.id LIMIT 10 FOR UPDATE OF o SKIP LOCKED`,
       );
       let sent = 0;
       for (const row of rows) {
         if (this.stopping) break;
+        const data = (row.payload.data ?? {}) as Record<string, unknown>;
+        const trace = {
+          correlationId: row.payload.correlationId,
+          messageId: row.payload.messageId ?? row.payload.causationId,
+          transactionId: data.transactionId ?? row.payload.transactionId,
+          walletId: row.aggregate_id,
+          providerId: row.provider_id,
+        };
         const event = OutboxMessage.rehydrate({
           id: row.id,
           aggregateId: row.aggregate_id,
@@ -81,12 +100,21 @@ export class Workers {
           nextAttemptAt: new Date(row.next_attempt_at),
         });
         try {
+          const queueUrl = await this.queues.url(
+            row.destination === "dlq" ? queueNames.dlq : queueNames.events,
+          );
           await this.queues.client.send(
             new SendMessageCommand({
               QueueUrl: queueUrl,
-              MessageBody: JSON.stringify(event.payload),
+              MessageBody:
+                row.destination === "dlq"
+                  ? String(row.payload.body)
+                  : JSON.stringify(event.payload),
               MessageGroupId: event.aggregateId,
-              MessageDeduplicationId: event.id,
+              MessageDeduplicationId:
+                row.destination === "dlq"
+                  ? String(row.payload.deduplicationId)
+                  : event.id,
             }),
             { abortSignal: AbortSignal.timeout(5000) },
           );
@@ -97,6 +125,14 @@ export class Workers {
             [event.publishedAt, event.id],
           );
           sent += 1;
+          if (row.destination === "dlq") {
+            metrics.dlq.inc();
+            log("error", "message_dead_lettered", {
+              ...trace,
+              eventId: event.id,
+              code: row.payload.failureCode,
+            });
+          }
         } catch (error) {
           event.scheduleRetry(new Date());
           await sql.query(
@@ -105,10 +141,12 @@ export class Workers {
           );
           metrics.retries.inc({ worker: "outbox" });
           log("warn", "outbox_publish_failed", {
+            ...trace,
             eventId: event.id,
             walletId: event.aggregateId,
             code: errorCode(error),
           });
+          break;
         }
       }
       const [lag] = await sql.query<{ seconds: string | null }>(
@@ -155,6 +193,13 @@ export class Workers {
     if (failed?.status === "rejected") throw failed.reason;
   }
   private async handle(url: string, message: Message): Promise<boolean> {
+    let input: WagerInput | undefined;
+    let idempotencyKey: string | undefined;
+    let processContext: Parameters<Processor["process"]>[2] | undefined;
+    const trace: Record<string, unknown> = {
+      messageId: message.MessageId,
+      transportMessageId: message.MessageId,
+    };
     let visibilityBusy = false;
     const heartbeat = setInterval(() => {
       if (visibilityBusy) return;
@@ -169,7 +214,7 @@ export class Workers {
         )
         .catch(() =>
           log("warn", "visibility_extension_failed", {
-            messageId: message.MessageId,
+            ...trace,
           }),
         )
         .finally(() => {
@@ -178,15 +223,43 @@ export class Workers {
     }, 10_000);
     try {
       const envelope = messageSchema.parse(JSON.parse(message.Body ?? ""));
-      const { idempotencyKey, ...input } = envelope.data;
-      await this.processor.process(input, idempotencyKey, {
+      const { idempotencyKey: key, ...business } = envelope.data;
+      input = business;
+      idempotencyKey = key;
+      Object.assign(trace, {
+        correlationId: envelope.messageId,
+        messageId: envelope.messageId,
+        walletId: input.walletId,
+        providerId: input.providerId,
+        externalTransactionId: input.externalTransactionId,
+      });
+      processContext = {
         correlationId: envelope.messageId,
         causationId: envelope.messageId,
         inbox: {
           messageId: envelope.messageId,
           hash: payloadHash({ input, idempotencyKey }),
         },
-      });
+      };
+      log("info", "message_processing_started", trace);
+      const result = await this.processor.process(
+        input,
+        idempotencyKey,
+        processContext,
+      );
+      trace.transactionId = result.transactionId;
+      if (result.status === "FAILED") {
+        await this.processor.recordPermanentFailure(
+          input,
+          idempotencyKey,
+          processContext,
+          "INFRASTRUCTURE_PERMANENT",
+          {
+            body: message.Body!,
+            messageId: message.MessageId ?? envelope.messageId,
+          },
+        );
+      }
       // Test fault injection is only enabled explicitly by the integration harness.
       if (process.env.TEST_CRASH_AFTER_COMMIT === "true") process.exit(86);
       await this.queues.client.send(
@@ -205,6 +278,47 @@ export class Workers {
         error instanceof SyntaxError ||
         error instanceof ConflictError ||
         error instanceof DomainError;
+      if (
+        !permanent &&
+        input &&
+        idempotencyKey &&
+        processContext &&
+        (receives >= 5 || isPermanentInfrastructureError(error))
+      ) {
+        try {
+          const result = await this.processor.recordPermanentFailure(
+            input,
+            idempotencyKey,
+            processContext,
+            receives >= 5 ? "RETRY_EXHAUSTED" : "INFRASTRUCTURE_PERMANENT",
+            {
+              body: message.Body!,
+              messageId: message.MessageId ?? String(trace.messageId),
+            },
+          );
+          trace.transactionId = result.transactionId;
+          await this.queues.client.send(
+            new DeleteMessageCommand({
+              QueueUrl: url,
+              ReceiptHandle: message.ReceiptHandle,
+            }),
+          );
+          log("warn", "message_failure_finalized", {
+            ...trace,
+            status: result.status,
+            code: result.failureCode,
+            receives,
+          });
+          return true;
+        } catch (recordingError) {
+          log("error", "failure_recording_retry", {
+            ...trace,
+            code: errorCode(recordingError),
+            receives,
+          });
+          throw recordingError;
+        }
+      }
       if (permanent || receives >= 5) {
         await this.queues.client.send(
           new SendMessageCommand({
@@ -222,7 +336,7 @@ export class Workers {
         );
         metrics.dlq.inc();
         log("error", "message_dead_lettered", {
-          messageId: message.MessageId,
+          ...trace,
           code: error instanceof ConflictError ? error.code : errorCode(error),
           receives,
         });
@@ -237,7 +351,7 @@ export class Workers {
         }),
       );
       log("warn", "message_retry", {
-        messageId: message.MessageId,
+        ...trace,
         code: errorCode(error),
         receives,
       });
@@ -253,6 +367,28 @@ export class Workers {
         ReceiptHandle: message.ReceiptHandle,
         VisibilityTimeout: 0,
       }),
+    );
+    const parsed = messageSchema.safeParse(
+      (() => {
+        try {
+          return JSON.parse(message.Body ?? "");
+        } catch {
+          return null;
+        }
+      })(),
+    );
+    log(
+      "info",
+      "message_released",
+      parsed.success
+        ? {
+            correlationId: parsed.data.messageId,
+            messageId: parsed.data.messageId,
+            walletId: parsed.data.data.walletId,
+            providerId: parsed.data.data.providerId,
+            transportMessageId: message.MessageId,
+          }
+        : { messageId: message.MessageId },
     );
   }
 }

@@ -8,6 +8,7 @@ import type { Request, Response } from "express";
 import { ZodError } from "zod";
 import { ConflictError, DomainError, NotFoundError } from "../domain/errors";
 import { errorCode, log } from "../infrastructure/telemetry";
+import { wagerSchema } from "../application/contracts";
 
 @Catch()
 export class ApiErrors implements ExceptionFilter {
@@ -38,7 +39,18 @@ export class ApiErrors implements ExceptionFilter {
         .status(error.getStatus())
         .json({ code: "HTTP_ERROR", correlationId });
     else {
-      log("error", "request_failed", { correlationId, code: errorCode(error) });
+      const input = wagerSchema.safeParse(request.body);
+      log("error", "request_failed", {
+        correlationId,
+        code: errorCode(error),
+        ...(input.success
+          ? {
+              walletId: input.data.walletId,
+              providerId: input.data.providerId,
+              externalTransactionId: input.data.externalTransactionId,
+            }
+          : {}),
+      });
       response.setHeader("retry-after", "1");
       response
         .status(503)

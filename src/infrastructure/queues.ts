@@ -39,6 +39,7 @@ export class Queues {
           QueueUrl: await this.url(name),
           AttributeNames: ["QueueArn"],
         }),
+        { abortSignal: AbortSignal.timeout(3000) },
       );
   }
   async setup() {

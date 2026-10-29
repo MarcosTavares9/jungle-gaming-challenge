@@ -29,7 +29,7 @@ bun run typecheck
 bun run db:down
 ```
 
-`db:down` desfaz a migration e remove os dados do desafio. Use somente em banco descartável.
+`db:down` desfaz a última migration. Reverter a migration de arquivo da DLQ remove seu histórico, e reverter a migration inicial remove os dados financeiros; exporte os registros antes de um rollback com dados. A migration de roteamento da outbox recusa rollback enquanto houver intenções DLQ não publicadas.
 
 ## Exemplo HTTP
 
@@ -73,6 +73,7 @@ Reenviar a mesma requisição retorna o mesmo resultado financeiro com `idempote
 - `404`: recurso não encontrado em consulta.
 - `409`: chave/payload conflitantes, identificador externo reutilizado ou carteira duplicada.
 - `422`: rejeição de negócio, persistida com `failureCode`.
+- `500`: resultado terminal `FAILED`, com `failureCode` persistido e replay estável.
 - `503`: indisponibilidade de infraestrutura; permite reenvio com a mesma chave.
 
 ## SQS
@@ -81,7 +82,11 @@ Filas de entrada e DLQ: `wager-transactions.fifo` e `wager-transactions-dlq.fifo
 
 O envelope de entrada segue a seção 10 do enunciado. `data.idempotencyKey` é obrigatório; o `messageId` do envelope é a identidade persistente da inbox. Ao enviar ao SQS, use `MessageGroupId=walletId` e um `MessageDeduplicationId`. O banco mantém as garantias mesmo quando esses identificadores de transporte mudam.
 
-O consumidor confirma mensagens somente depois do commit. Rejeições de negócio são confirmadas. Payloads inválidos e conflitos permanentes vão para a DLQ. Falhas transitórias usam backoff e limite de cinco recebimentos. A DLQ mantém o envelope original para diagnóstico e reenvio operacional.
+O consumidor confirma mensagens somente depois do commit. Rejeições de negócio são confirmadas. Payloads inválidos e conflitos permanentes vão para a DLQ. Falhas transitórias usam backoff e limite de cinco recebimentos. Falhas permanentes de infraestrutura e esgotamento das tentativas geram `FAILED`, inbox, evento e intenção DLQ na mesma transação, sem alterar saldo. Um publisher entrega o corpo original à DLQ, com retry persistente se o SQS estiver indisponível.
+
+Se o PostgreSQL estiver indisponível até o redrive nativo do SQS, a mensagem fica na DLQ. Após recuperar o banco e aplicar as migrations, `bun run dlq:audit` processa até dez mensagens: persiste `FAILED` para operações válidas sem resultado anterior, preserva resultados já concluídos e grava o corpo original em `dlq_archive` antes de confirmar a remoção no SQS. Repita o comando para avançar sobre os próximos lotes, inclusive dentro do mesmo grupo FIFO.
+
+O arquivo é append-only e identifica cada entrega por fila e `message_id`, com SHA-256 do corpo original. Payloads inválidos e conflitos também são arquivados, com resultado `INVALID_PAYLOAD` ou `CONFLICT`, sem substituir transações financeiras. O histórico continua disponível no PostgreSQL para análise manual. Falha técnica no banco, arquivo ou SQS retorna código de saída 1 e mantém as mensagens não confirmadas disponíveis para nova tentativa; dados arquivados e transações já confirmadas são reaproveitados de forma idempotente.
 
 Eventos levam `eventId`, `aggregateId`, `correlationId`, `causationId`, `occurredAt`, `eventType`, `version` e `data`. Consumidores devem deduplicar por `eventId`: uma queda entre publicação e confirmação da outbox pode repetir o evento.
 
@@ -96,6 +101,7 @@ scripts/             migrations e provisionamento das filas
 tests/unit/          invariantes de domínio e contratos
 tests/integration/   PostgreSQL/SQS reais, HTTP e concorrência entre processos
 tests/fixtures/      processos auxiliares dos testes
+tests/resilience/    três containers, indisponibilidade real e SIGTERM em Linux
 ```
 
 As decisões e interpretações do domínio estão em [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -106,14 +112,17 @@ As decisões e interpretações do domínio estão em [ARCHITECTURE.md](ARCHITEC
 bun run test               # suíte completa
 bun run test:unit          # domínio e contratos, sem Docker
 bun run test:integration   # integração, concorrência e recuperação de falhas
+bun run test:resilience    # Compose isolado com três aplicações e falhas reais
 bun run typecheck
 bun run format:check
 ```
 
 A integração inicia PostgreSQL e LocalStack do Compose, cria um banco `jungle_test_<uuid>` e três filas com prefixo exclusivo, aplica migrations e sobe três processos HTTP. Ao terminar, encerra os processos e remove somente o banco e as filas criados naquela execução. O banco `jungle` e as filas da aplicação são preservados. O usuário PostgreSQL local precisa de permissão para criar bancos; a configuração do Compose já atende. Endereços externos são recusados pelo runner.
 
+A resiliência usa o mesmo `compose.yaml` com `compose.resilience.yaml`, projeto de nome exclusivo, portas dinâmicas e volume PostgreSQL próprio. Sobe três containers da aplicação, para e reinicia o PostgreSQL, pausa e retoma o LocalStack e envia SIGTERM a um consumidor com mensagem em andamento. Containers, rede e volume desse projeto são removidos ao terminar. A infraestrutura de desenvolvimento não é interrompida. É necessário Docker Compose 2.24.4 ou superior para o override das portas.
+
 Os testes cobrem valores monetários exatos, regras de transição, constraints e imutabilidade no banco, rollback de falhas tardias em inbox/outbox, idempotência, 50 repetições paralelas, disputa de saldo, independência entre carteiras, referências fora de ordem, reconciliação concorrente, retry, DLQ, publishers concorrentes e recuperação após reinício. Depois de cada teste de integração, saldo e ledger de todas as carteiras são reconciliados e a correspondência entre transação e lançamento é verificada.
 
-Use `bun run test` para incluir a integração. `bun test` diretamente executa os unitários e marca a integração como ignorada, pois não provisiona o ambiente isolado. O teste de redelivery aguarda o visibility timeout real do SQS; a suíte de integração leva aproximadamente um minuto, além do download inicial das imagens.
+Use `bun run test` para executar as três etapas em sequência. `bun test` diretamente executa os unitários e marca integração e resiliência como ignoradas, pois não provisiona os ambientes isolados. O teste de redelivery aguarda o visibility timeout real de 30 segundos do SQS. A duração total varia com a máquina e inclui build, startup, indisponibilidade e recuperação dos serviços.
 
 `SQS_QUEUE_PREFIX` é vazio por padrão e preserva os nomes do enunciado. Os pontos de falha `TEST_CRASH_AFTER_COMMIT=true` (saída 86) e `TEST_CRASH_AFTER_PUBLISH=true` (saída 87) existem exclusivamente para os cenários locais de recuperação. Eles encerram o processo após o efeito externo e antes de sua confirmação, sem substituir PostgreSQL ou SQS por mocks.

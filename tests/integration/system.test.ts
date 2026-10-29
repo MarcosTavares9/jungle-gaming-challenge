@@ -30,7 +30,7 @@ describe.skipIf(process.env.INTEGRATION_TEST_RUN !== "true")(
     });
 
     test("migrations são reversíveis e reaplicáveis", async () => {
-      await context.db.migrator.down();
+      await context.db.migrator.down({ to: 0 });
       const [removed] = await context.sql.query<{ n: string }>(
         "SELECT COUNT(*)::text AS n FROM information_schema.tables WHERE table_schema='public' AND table_name='wallets'",
       );
@@ -534,8 +534,10 @@ describe.skipIf(process.env.INTEGRATION_TEST_RUN !== "true")(
         ),
       );
       expect(
-        results.every((r) => r.status === 200 && r.body.status === "PROCESSED"),
-      ).toBe(true);
+        results.filter(
+          (r) => r.status !== 200 || r.body.status !== "PROCESSED",
+        ),
+      ).toEqual([]);
       expect(results.filter((r) => !r.body.idempotentReplay)).toHaveLength(1);
       expect(results.filter((r) => r.body.idempotentReplay)).toHaveLength(49);
       expect(new Set(results.map((r) => r.body.transactionId)).size).toBe(1);
@@ -858,14 +860,21 @@ describe.skipIf(process.env.INTEGRATION_TEST_RUN !== "true")(
       } finally {
         await unlock();
       }
+      await context.drainOutbox();
       const message = await context.receive(queueNames.dlq);
       expect(message.Body).toBe(sent.body);
       await context.ack(queueNames.dlq, message);
+      expect(
+        await context.queries.providerTransaction(
+          input.providerId,
+          input.externalTransactionId,
+        ),
+      ).toMatchObject({ status: "FAILED", failureCode: "RETRY_EXHAUSTED" });
       expect((await context.queries.wallet(wallet.id)).balance.amount).toBe(
         "100.00",
       );
       expect(await context.queueCount(queueNames.requests)).toBe(0);
-    }, 20_000);
+    }, 60_000);
 
     test("dois processos publicam a mesma outbox sem disputar os mesmos registros", async () => {
       await context.drainOutbox();
