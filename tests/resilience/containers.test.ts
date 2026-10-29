@@ -238,7 +238,7 @@ describe.skipIf(process.env.RESILIENCE_TEST_RUN !== "true")(
         const pending = await context.send(second);
         // Stopped peers have no outstanding long polls that could reserve the released message.
         await docker(["start", active.id]);
-        await eventually(
+        const prior = await eventually(
           () => logs(active),
           (lines) =>
             lines.some(
@@ -248,7 +248,6 @@ describe.skipIf(process.env.RESILIENCE_TEST_RUN !== "true")(
             ),
           4000,
         );
-        const prior = await logs(active);
         const priorStopping = prior.filter(
           (l) => l.event === "service_stopping",
         ).length;
@@ -256,6 +255,9 @@ describe.skipIf(process.env.RESILIENCE_TEST_RUN !== "true")(
           (l) => l.event === "service_stopped",
         ).length;
         await docker(["kill", "--signal=SIGTERM", active.id]);
+        // Release immediately after signal delivery; log collection must not consume the 5s lock timeout.
+        await unlock();
+        unlocked = true;
         await eventually(
           () => logs(active),
           (lines) =>
@@ -264,8 +266,6 @@ describe.skipIf(process.env.RESILIENCE_TEST_RUN !== "true")(
             ).length > priorStopping,
           3000,
         );
-        await unlock();
-        unlocked = true;
         const shutdown = await eventually(
           () => logs(active),
           (lines) =>

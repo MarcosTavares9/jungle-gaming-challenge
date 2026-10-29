@@ -78,9 +78,9 @@ describe.skipIf(process.env.INTEGRATION_TEST_RUN !== "true")(
       );
       expect(rows).toHaveLength(2);
       expect(rows.filter((r) => r.destination === "dlq")).toHaveLength(1);
-      await expect(context.db.migrator.down()).rejects.toThrow(
-        "Publish pending DLQ intents",
-      );
+      await expect(
+        context.db.migrator.down({ to: "Migration202610290001" }),
+      ).rejects.toThrow("Publish pending DLQ intents");
       expect(
         await context.sql.query(
           "SELECT message_id FROM inbox WHERE message_id=?",
@@ -213,7 +213,7 @@ describe.skipIf(process.env.INTEGRATION_TEST_RUN !== "true")(
       );
     });
 
-    test("redrive nativo pode ser auditado após retorno do banco sem remover mensagem da DLQ", async () => {
+    test("redrive nativo é arquivado antes de sair da DLQ após retorno do banco", async () => {
       const wallet = await context.wallet();
       const input = context.input(wallet);
       const sent = await context.send(input);
@@ -247,9 +247,15 @@ describe.skipIf(process.env.INTEGRATION_TEST_RUN !== "true")(
       expect((await context.queries.wallet(wallet.id)).balance.amount).toBe(
         "100.00",
       );
-      const dead = await context.receive(queueNames.dlq);
-      expect(dead.Body).toBe(sent.body);
-      await context.ack(queueNames.dlq, dead);
+      expect(await context.queueCount(queueNames.dlq)).toBe(0);
+      const archived = await context.sql.query<{
+        body: string;
+        outcome: string;
+      }>(
+        "SELECT body,outcome FROM dlq_archive WHERE source_queue=? AND body=?",
+        [queueNames.dlq, sent.body],
+      );
+      expect(archived).toEqual([{ body: sent.body, outcome: "AUDITED" }]);
       expect(
         await context.sql.query(
           "SELECT id FROM outbox WHERE destination='dlq' AND aggregate_id=?",

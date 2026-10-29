@@ -4,6 +4,7 @@ import { MikroORM, type EntityManager } from "@mikro-orm/postgresql";
 import { config } from "./config";
 import { Migration202610290001 } from "./migrations/Migration202610290001";
 import { Migration202610290002 } from "./migrations/Migration202610290002";
+import { Migration202610290003 } from "./migrations/Migration202610290003";
 import { log } from "./telemetry";
 
 // ORM records stay outside the domain. Numeric columns remain decimal strings.
@@ -43,7 +44,11 @@ export async function openDatabase() {
       },
     },
     migrations: {
-      migrationsList: [Migration202610290001, Migration202610290002],
+      migrationsList: [
+        Migration202610290001,
+        Migration202610290002,
+        Migration202610290003,
+      ],
       transactional: true,
       allOrNothing: true,
     },

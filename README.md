@@ -29,7 +29,7 @@ bun run typecheck
 bun run db:down
 ```
 
-`db:down` desfaz a última migration. Reverter a migration inicial remove os dados do desafio; use somente em banco descartável. A migration de roteamento da outbox recusa rollback enquanto houver intenções DLQ não publicadas.
+`db:down` desfaz a última migration. Reverter a migration de arquivo da DLQ remove seu histórico, e reverter a migration inicial remove os dados financeiros; exporte os registros antes de um rollback com dados. A migration de roteamento da outbox recusa rollback enquanto houver intenções DLQ não publicadas.
 
 ## Exemplo HTTP
 
@@ -84,7 +84,9 @@ O envelope de entrada segue a seção 10 do enunciado. `data.idempotencyKey` é 
 
 O consumidor confirma mensagens somente depois do commit. Rejeições de negócio são confirmadas. Payloads inválidos e conflitos permanentes vão para a DLQ. Falhas transitórias usam backoff e limite de cinco recebimentos. Falhas permanentes de infraestrutura e esgotamento das tentativas geram `FAILED`, inbox, evento e intenção DLQ na mesma transação, sem alterar saldo. Um publisher entrega o corpo original à DLQ, com retry persistente se o SQS estiver indisponível.
 
-Se o PostgreSQL estiver indisponível até o redrive nativo do SQS, a mensagem fica na DLQ. Após recuperar o banco, `bun run dlq:audit` audita um lote de até dez mensagens: persiste `FAILED` para operações válidas sem resultado anterior, preserva transações já concluídas e mantém os envelopes na DLQ. Repita por lote conforme a operação. Mensagens inválidas ou conflitantes continuam disponíveis para análise manual.
+Se o PostgreSQL estiver indisponível até o redrive nativo do SQS, a mensagem fica na DLQ. Após recuperar o banco e aplicar as migrations, `bun run dlq:audit` processa até dez mensagens: persiste `FAILED` para operações válidas sem resultado anterior, preserva resultados já concluídos e grava o corpo original em `dlq_archive` antes de confirmar a remoção no SQS. Repita o comando para avançar sobre os próximos lotes, inclusive dentro do mesmo grupo FIFO.
+
+O arquivo é append-only e identifica cada entrega por fila e `message_id`, com SHA-256 do corpo original. Payloads inválidos e conflitos também são arquivados, com resultado `INVALID_PAYLOAD` ou `CONFLICT`, sem substituir transações financeiras. O histórico continua disponível no PostgreSQL para análise manual. Falha técnica no banco, arquivo ou SQS retorna código de saída 1 e mantém as mensagens não confirmadas disponíveis para nova tentativa; dados arquivados e transações já confirmadas são reaproveitados de forma idempotente.
 
 Eventos levam `eventId`, `aggregateId`, `correlationId`, `causationId`, `occurredAt`, `eventType`, `version` e `data`. Consumidores devem deduplicar por `eventId`: uma queda entre publicação e confirmação da outbox pode repetir o evento.
 

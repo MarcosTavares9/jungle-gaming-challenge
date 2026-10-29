@@ -83,7 +83,11 @@ Falhas de conexão, timeout de lock, deadlock e serialização continuam transit
 
 A outbox tem destinos `events` e `dlq`. Intenções DLQ guardam o corpo original e a identidade da entrega; um índice parcial impede intenções duplicadas para a mesma entrega. O ack do comando depende do commit dessa intenção, sem depender de uma chamada imediata ao SQS. O publisher publica depois e mantém retry persistente. Reverter essa migration exige publicar primeiro intenções DLQ pendentes.
 
-Se o banco permanecer indisponível até o redrive nativo, não é possível gravar `FAILED` naquele momento. O envelope continua auditável na DLQ. Após o retorno do banco, o comando `dlq:audit` persiste a falha para mensagens válidas ainda sem resultado, sem retirar os envelopes da fila nem substituir operações processadas. Payloads inválidos e conflitos não recebem transações financeiras artificiais.
+Se o banco permanecer indisponível até o redrive nativo, não é possível gravar `FAILED` naquele momento. O envelope continua auditável na DLQ. Após o retorno do banco, o comando `dlq:audit` persiste a falha para mensagens válidas ainda sem resultado, sem substituir operações processadas. Payloads inválidos e conflitos não recebem transações financeiras artificiais.
+
+A auditoria arquiva o corpo original em `dlq_archive` antes de remover a entrega do SQS. Esse ack permite avançar na cabeça do grupo FIFO em execuções posteriores; devolver sempre o mesmo lote à visibilidade impediria alcançar a 11ª mensagem. O arquivo tem identidade única por fila/MessageId, hash SHA-256 do corpo exato e proteção contra UPDATE, DELETE e TRUNCATE. Resultados `AUDITED`, `INVALID_PAYLOAD` e `CONFLICT` preservam os envelopes e a classificação para análise operacional.
+
+O registro financeiro e o arquivo usam commits separados, mas o ack depende da conclusão de ambos. Uma queda entre os commits mantém a mensagem na DLQ; a retomada reutiliza a transação existente e completa o arquivo. Uma queda depois do arquivo e antes do ack reutiliza o registro de arquivo, sem duplicar histórico nem efeito financeiro. Erros técnicos interrompem o lote com exit code 1 e devolvem à visibilidade as mensagens ainda não confirmadas. Somente erros esperados de payload/conflito são classificados e arquivados como tal. Reverter a migration de arquivo remove esse histórico e exige exportação prévia quando houver dados.
 
 ## Eventos e recuperação
 
