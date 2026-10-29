@@ -1,0 +1,60 @@
+name: jungle-challenge
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: jungle
+      POSTGRES_PASSWORD: jungle
+      POSTGRES_DB: jungle
+    ports: ["127.0.0.1:15432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jungle -d jungle"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  localstack:
+    image: localstack/localstack:4.14.0
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      SQS_ENDPOINT_STRATEGY: path
+    ports: ["127.0.0.1:4566:4566"]
+    healthcheck:
+      test: ["CMD", "awslocal", "sqs", "list-queues"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+  setup:
+    build: .
+    command:
+      ["sh", "-c", "bun scripts/migrate.ts up && bun scripts/setup-queues.ts"]
+    environment: &app-env
+      DATABASE_URL: postgresql://jungle:jungle@postgres:5432/jungle
+      SQS_ENDPOINT: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    depends_on:
+      postgres: { condition: service_healthy }
+      localstack: { condition: service_healthy }
+  app:
+    build: .
+    environment: *app-env
+    ports: ["127.0.0.1:3000-3002:3000"]
+    depends_on:
+      setup: { condition: service_completed_successfully }
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://localhost:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  postgres-data:
