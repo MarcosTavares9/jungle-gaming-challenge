@@ -1,5 +1,9 @@
 import "reflect-metadata";
-import { Module, type OnApplicationShutdown } from "@nestjs/common";
+import {
+  Module,
+  type OnApplicationShutdown,
+  type BeforeApplicationShutdown,
+} from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { Processor } from "./application/processor";
 import { Queries } from "./application/queries";
@@ -11,6 +15,7 @@ import { log } from "./infrastructure/telemetry";
 import { WagerController, OperationsController } from "./http/controller";
 import { ProviderIdentityGuard } from "./http/auth";
 import { ApiErrors } from "./http/errors";
+import type { Request, Response, NextFunction } from "express";
 
 const db = await openDatabase();
 const queues = new Queues();
@@ -26,14 +31,28 @@ const workers = new Workers(db, processor, queues);
     { provide: Queries, useValue: new Queries(db) },
   ],
 })
-class AppModule implements OnApplicationShutdown {
-  async onApplicationShutdown() {
+class AppModule implements OnApplicationShutdown, BeforeApplicationShutdown {
+  async beforeApplicationShutdown(signal?: string) {
+    log("info", "service_stopping", { signal });
     await workers.stop();
+  }
+  async onApplicationShutdown(signal?: string) {
     queues.close();
     await db.close(true);
+    log("info", "service_stopped", { signal });
   }
 }
 const app = await NestFactory.create(AppModule, { logger: false });
+app.use((request: Request, response: Response, next: NextFunction) => {
+  const header = request.headers["x-correlation-id"];
+  const correlationId =
+    typeof header === "string" && header.length > 0 && header.length <= 200
+      ? header
+      : crypto.randomUUID();
+  request.headers["x-correlation-id"] = correlationId;
+  response.setHeader("x-correlation-id", correlationId);
+  next();
+});
 app.useGlobalFilters(new ApiErrors());
 app.enableShutdownHooks();
 await app.listen(config.PORT, "0.0.0.0");

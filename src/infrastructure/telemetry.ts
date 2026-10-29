@@ -62,12 +62,18 @@ export function log(
       level,
       event,
       time: new Date().toISOString(),
+      instanceId: process.env.HOSTNAME ?? String(process.pid),
       ...context,
+      correlationId: context.correlationId ?? null,
+      messageId: context.messageId ?? null,
+      transactionId: context.transactionId ?? null,
+      walletId: context.walletId ?? null,
+      providerId: context.providerId ?? null,
     }),
   );
 }
 export function errorCode(error: unknown): string {
   if (typeof error !== "object" || !error) return "UNKNOWN";
-  const e = error as { code?: string; cause?: unknown };
-  return e.code ?? (e.cause ? errorCode(e.cause) : "UNKNOWN");
+  const e = error as { code?: string; name?: string; cause?: unknown };
+  return e.code ?? (e.cause ? errorCode(e.cause) : (e.name ?? "UNKNOWN"));
 }

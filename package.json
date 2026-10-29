@@ -7,14 +7,16 @@
     "dev": "bun --watch src/main.ts",
     "start": "bun src/main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun run test:unit && bun run test:integration",
+    "test": "bun run test:unit && bun run test:integration && bun run test:resilience",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun scripts/test-integration.ts",
-    "format": "prettier --write src scripts tests package.json tsconfig.json compose.yaml README.md ARCHITECTURE.md",
-    "format:check": "prettier --check src scripts tests package.json tsconfig.json compose.yaml README.md ARCHITECTURE.md",
+    "test:resilience": "bun scripts/test-resilience.ts",
+    "format": "prettier --write src scripts tests package.json tsconfig.json compose.yaml compose.resilience.yaml README.md ARCHITECTURE.md",
+    "format:check": "prettier --check src scripts tests package.json tsconfig.json compose.yaml compose.resilience.yaml README.md ARCHITECTURE.md",
     "db:up": "bun scripts/migrate.ts up",
     "db:down": "bun scripts/migrate.ts down",
-    "queues:setup": "bun scripts/setup-queues.ts"
+    "queues:setup": "bun scripts/setup-queues.ts",
+    "dlq:audit": "bun scripts/audit-dlq.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.0.0",

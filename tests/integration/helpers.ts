@@ -297,6 +297,7 @@ export class IntegrationContext {
         return row!.n;
       },
       (n) => n === "0",
+      30_000,
     );
   }
   async lock(walletId: string) {

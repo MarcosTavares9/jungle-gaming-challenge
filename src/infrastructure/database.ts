@@ -3,6 +3,8 @@ import { Migrator } from "@mikro-orm/migrations";
 import { MikroORM, type EntityManager } from "@mikro-orm/postgresql";
 import { config } from "./config";
 import { Migration202610290001 } from "./migrations/Migration202610290001";
+import { Migration202610290002 } from "./migrations/Migration202610290002";
+import { log } from "./telemetry";
 
 // ORM records stay outside the domain. Numeric columns remain decimal strings.
 export class WalletRecord {
@@ -32,9 +34,16 @@ export async function openDatabase() {
     clientUrl: config.DATABASE_URL,
     entities: [walletEntity],
     extensions: [Migrator],
-    pool: { min: 0, max: 10 },
+    pool: { min: 0, max: 10, acquireTimeoutMillis: 15_000 },
+    driverOptions: {
+      connection: { connectionTimeoutMillis: 3000 },
+      log: {
+        warn: () => log("warn", "database_connection_warning"),
+        error: () => log("error", "database_connection_error"),
+      },
+    },
     migrations: {
-      migrationsList: [Migration202610290001],
+      migrationsList: [Migration202610290001, Migration202610290002],
       transactional: true,
       allOrNothing: true,
     },
