@@ -234,6 +234,8 @@ const server = Bun.serve({
       return staticFile("styles.css", "text/css; charset=utf-8");
     if (request.method === "GET" && url.pathname === "/app.js")
       return staticFile("app.js", "text/javascript; charset=utf-8");
+    if (request.method === "GET" && url.pathname === "/monkey-logo.png")
+      return staticFile("monkey-logo.png", "image/png");
     if (request.method === "GET" && url.pathname === "/api/state")
       return json({
         suites: suites.map(({ command: _, ...suite }) => suite),
