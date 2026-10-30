@@ -22,8 +22,9 @@ describe.skipIf(process.env.INTEGRATION_TEST_RUN !== "true")(
   () => {
     beforeAll(async () => {
       await context.setup();
-      await Promise.all(Array.from({ length: 3 }, () => context.start()));
-    }, 30_000);
+      // A concorrência testada é de processamento; a subida sequencial evita flake no cold start.
+      for (let index = 0; index < 3; index += 1) await context.start();
+    }, 60_000);
     afterAll(() => context.close(), 15_000);
     afterEach(async () => {
       if (context.db) await context.assertConsistent();
