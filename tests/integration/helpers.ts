@@ -96,12 +96,16 @@ export class ServiceProcess {
           }
         },
         Boolean,
-        15_000,
+        30_000,
       );
       return instance;
     } catch (error) {
       await instance.stop();
-      throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Falha ao iniciar serviço: ${reason}\n${await instance.logs()}`,
+        { cause: error },
+      );
     }
   }
   async logs() {
