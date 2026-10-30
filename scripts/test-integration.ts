@@ -28,6 +28,7 @@ if ((await infrastructure.exited) !== 0)
 const suffix = crypto.randomUUID().replaceAll("-", "");
 const databaseName = `jungle_test_${suffix}`;
 const prefix = `test-${suffix.slice(0, 12)}-`;
+const testArguments = Bun.argv.slice(2);
 const root = await openDatabase();
 url.pathname = `/${databaseName}`;
 let child: ReturnType<typeof Bun.spawn> | undefined;
@@ -39,7 +40,14 @@ try {
   created = true;
   console.log(`Integração isolada: ${databaseName}, filas ${prefix}*`);
   child = Bun.spawn(
-    [process.execPath, "test", "tests/integration", "--timeout", "60000"],
+    [
+      process.execPath,
+      "test",
+      "tests/integration",
+      "--timeout",
+      "60000",
+      ...testArguments,
+    ],
     {
       env: {
         ...process.env,

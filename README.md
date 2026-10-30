@@ -98,6 +98,7 @@ src/application/     processamento compartilhado, contratos e consultas
 src/infrastructure/  MikroORM, migrations, SQS, workers e métricas
 src/http/            controllers, filtro de erros e extensão de autenticação
 scripts/             migrations e provisionamento das filas
+test-console/        painel local para demonstração das validações
 tests/unit/          invariantes de domínio e contratos
 tests/integration/   PostgreSQL/SQS reais, HTTP e concorrência entre processos
 tests/fixtures/      processos auxiliares dos testes
@@ -112,10 +113,28 @@ As decisões e interpretações do domínio estão em [ARCHITECTURE.md](ARCHITEC
 bun run test               # suíte completa
 bun run test:unit          # domínio e contratos, sem Docker
 bun run test:integration   # integração, concorrência e recuperação de falhas
+bun run test:concurrency   # recorte dos cenários obrigatórios de paralelismo
 bun run test:resilience    # Compose isolado com três aplicações e falhas reais
+bun run validate           # formatação, tipos e todas as suítes
 bun run typecheck
 bun run format:check
 ```
+
+### Test Console
+
+Para apresentar e executar as validações por uma interface local:
+
+```sh
+bun run test:console
+```
+
+Abra `http://127.0.0.1:4173`. O painel oferece comandos predefinidos para qualidade estática, unidade, integração, concorrência, resiliência e validação completa, com logs e duração. Ele escuta somente no loopback, mantém o histórico apenas em memória e bloqueia execuções simultâneas para que as suítes não disputem os mesmos recursos.
+
+O objetivo do painel é tornar as garantias do projeto demonstráveis sem esconder a execução real. Cada botão inicia o mesmo comando disponível no terminal e mantém a saída completa visível. Acima dos logs, uma topologia resume o cenário ativo e destaca aplicação, SQS, PostgreSQL, outbox, wallet ou asserções conforme eventos reconhecidos aparecem na saída. Logs estruturados do worker, como processamento iniciado, resultado financeiro, retry e DLQ, alimentam essa visualização diretamente. Linhas sem mapeamento permanecem no console e não geram estado visual inferido.
+
+Na suíte de concorrência, o painel representa os 50 envios atravessando três processos e mostra o resultado esperado de um débito com 49 replays idempotentes. O resultado visual não substitui a evidência: aprovação, falha, duração e números vêm do processo executado. As animações pausam quando a aba fica oculta e respeitam a preferência de redução de movimento do sistema.
+
+O runner não aceita comandos enviados pelo navegador. A API local recebe somente identificadores de suítes presentes em uma lista fechada, limita uma execução por vez, restringe o acesso a `127.0.0.1` e mantém a saída em memória com limite de tamanho. Assim, a interface serve como apoio de demonstração e diagnóstico sem expor um terminal genérico.
 
 A integração inicia PostgreSQL e LocalStack do Compose, cria um banco `jungle_test_<uuid>` e três filas com prefixo exclusivo, aplica migrations e sobe três processos HTTP. Ao terminar, encerra os processos e remove somente o banco e as filas criados naquela execução. O banco `jungle` e as filas da aplicação são preservados. O usuário PostgreSQL local precisa de permissão para criar bancos; a configuração do Compose já atende. Endereços externos são recusados pelo runner.
 
