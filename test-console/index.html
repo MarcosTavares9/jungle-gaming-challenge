@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
     <title>Jungle Gaming | Test Console</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=3" />
   </head>
   <body>
     <a class="skip-link" href="#suites">Ir para as suítes</a>
@@ -101,6 +101,38 @@
             <span class="status status--idle">Aguardando</span>
             <span>Selecione uma suíte para começar.</span>
           </div>
+          <section class="scenario" aria-labelledby="scenario-title">
+            <div class="scenario__heading">
+              <div>
+                <span>Visualização do cenário</span>
+                <strong id="scenario-title">Topologia da validação</strong>
+              </div>
+              <span class="scenario__legend">Sincronizado aos logs</span>
+            </div>
+            <div
+              id="scenario-stage"
+              class="scenario-stage"
+              aria-hidden="true"
+            ></div>
+            <div
+              id="scenario-event"
+              class="scenario-event"
+              role="status"
+              aria-atomic="true"
+            >
+              <span>Evento observado</span>
+              <div>
+                <strong id="scenario-event-title">Aguardando logs</strong>
+                <small id="scenario-event-detail"
+                  >O próximo evento reconhecido aparecerá aqui.</small
+                >
+              </div>
+            </div>
+            <p id="scenario-description" class="scenario__description">
+              Selecione uma suíte para visualizar o fluxo validado pelo teste
+              real.
+            </p>
+          </section>
           <pre id="output" tabindex="0" aria-label="Logs da validação">
 Nenhuma execução iniciada.</pre
           >
@@ -128,6 +160,6 @@ Nenhuma execução iniciada.</pre
       </div>
     </footer>
 
-    <script type="module" src="/app.js?v=3"></script>
+    <script type="module" src="/app.js?v=5"></script>
   </body>
 </html>

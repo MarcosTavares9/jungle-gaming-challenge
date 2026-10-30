@@ -510,8 +510,470 @@ h2 {
   background: #4b252d;
 }
 
+.scenario {
+  margin: 16px 22px 0;
+  overflow: hidden;
+  border: 1px solid #31415a;
+  border-radius: 12px;
+  background: #152136;
+}
+
+.scenario__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.scenario__heading div {
+  display: grid;
+  gap: 3px;
+}
+
+.scenario__heading span,
+.scenario__description {
+  color: #93a4be;
+  font-size: 11px;
+}
+
+.scenario-event {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: center;
+  gap: 12px;
+  min-height: 62px;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: #17243a;
+}
+
+.scenario-event > span {
+  padding: 5px 7px;
+  border: 1px solid #3b506f;
+  border-radius: 999px;
+  color: #8fb8ff;
+  font:
+    700 9px/1 "Fira Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.scenario-event div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.scenario-event strong,
+.scenario-event small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-event strong {
+  color: #eef4ff;
+  font-size: 12px;
+}
+
+.scenario-event small {
+  color: #93a4be;
+  font:
+    500 10px/1.4 "Fira Code",
+    Consolas,
+    monospace;
+}
+
+.scenario__heading strong {
+  color: #eaf1fc;
+  font-size: 13px;
+}
+
+.scenario__legend {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #223149;
+  font-family: "Fira Code", Consolas, monospace;
+  white-space: nowrap;
+}
+
+.scenario__description {
+  min-height: 48px;
+  margin: 0;
+  padding: 11px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  line-height: 1.5;
+}
+
+.scenario-stage {
+  position: relative;
+  display: grid;
+  min-height: 190px;
+  place-items: center;
+  overflow: hidden;
+  padding: 20px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    #111b2c;
+  background-size: 24px 24px;
+}
+
+.scenario-stage--paused *,
+.scenario-stage--paused *::before,
+.scenario-stage--paused *::after {
+  animation-play-state: paused !important;
+}
+
+.scenario-flow {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.scenario-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.scenario-node,
+.scenario-processes span,
+.scenario-pipeline span,
+.scenario-overview span {
+  display: grid;
+  min-height: 38px;
+  place-items: center;
+  padding: 8px 11px;
+  border: 1px solid #42536d;
+  border-radius: 9px;
+  color: #dbe7f9;
+  background: #1d2b42;
+  font:
+    600 10px/1.2 "Fira Code",
+    Consolas,
+    monospace;
+  text-align: center;
+  transition:
+    border-color 180ms ease,
+    color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.scenario-stage--target-source [data-target="source"],
+.scenario-stage--target-format [data-target="format"],
+.scenario-stage--target-types [data-target="types"],
+.scenario-stage--target-money [data-target="money"],
+.scenario-stage--target-wallet [data-target="wallet"],
+.scenario-stage--target-transaction [data-target="transaction"],
+.scenario-stage--target-assertion [data-target="assertion"],
+.scenario-stage--target-http [data-target="http"],
+.scenario-stage--target-queue [data-target="queue"],
+.scenario-stage--target-application [data-target="application"],
+.scenario-stage--target-database [data-target="database"],
+.scenario-stage--target-outbox [data-target="outbox"],
+.scenario-stage--target-ingress [data-target="ingress"] {
+  border-color: #e5ae54;
+  color: #fff3cc;
+  background: #4b391d;
+  box-shadow:
+    0 0 0 4px rgba(229, 174, 84, 0.13),
+    0 0 20px rgba(229, 174, 84, 0.16);
+}
+
+.scenario-stage--observed [data-target] {
+  animation: none;
+}
+
+.scenario-stage--observed.scenario-stage--target-source [data-target="source"],
+.scenario-stage--observed.scenario-stage--target-format [data-target="format"],
+.scenario-stage--observed.scenario-stage--target-types [data-target="types"],
+.scenario-stage--observed.scenario-stage--target-money [data-target="money"],
+.scenario-stage--observed.scenario-stage--target-wallet [data-target="wallet"],
+.scenario-stage--observed.scenario-stage--target-transaction
+  [data-target="transaction"],
+.scenario-stage--observed.scenario-stage--target-assertion
+  [data-target="assertion"],
+.scenario-stage--observed.scenario-stage--target-http [data-target="http"],
+.scenario-stage--observed.scenario-stage--target-queue [data-target="queue"],
+.scenario-stage--observed.scenario-stage--target-application
+  [data-target="application"],
+.scenario-stage--observed.scenario-stage--target-database
+  [data-target="database"],
+.scenario-stage--observed.scenario-stage--target-outbox [data-target="outbox"],
+.scenario-stage--observed.scenario-stage--target-ingress
+  [data-target="ingress"] {
+  animation: event-observed 620ms ease-out;
+}
+
+.scenario-node--app {
+  border-color: #5e87d2;
+  color: #fff;
+  background: #244d99;
+}
+
+.scenario-node--success,
+.scenario-stage--passed .scenario-pipeline span {
+  border-color: #31996a;
+  color: #bcf1d6;
+  background: #194735;
+}
+
+.scenario-stage--failed .scenario-node,
+.scenario-stage--failed .scenario-processes span {
+  border-color: #b94a55;
+  color: #ffc7cc;
+  background: #4b252d;
+}
+
+.scenario-arrow {
+  position: relative;
+  width: clamp(24px, 7vw, 56px);
+  height: 2px;
+  overflow: visible;
+  background: #4a6388;
+}
+
+.scenario-arrow::after {
+  position: absolute;
+  top: -4px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid #7fa7e8;
+  border-right: 2px solid #7fa7e8;
+  content: "";
+  transform: rotate(45deg);
+}
+
+.scenario-stage--running .scenario-arrow::before {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #8bb6ff;
+  box-shadow: 0 0 12px #5791ef;
+  content: "";
+  animation: arrow-travel 1.25s ease-in-out infinite;
+}
+
+.scenario-stage--running .scenario-processes span,
+.scenario-stage--running .scenario-node--app {
+  animation: node-pulse 1.8s ease-in-out infinite;
+}
+
+.scenario-concurrency {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: 150px;
+  grid-template-columns: 64px 1fr 82px;
+  align-items: center;
+  gap: 14px;
+}
+
+.scenario-concurrency::before {
+  position: absolute;
+  top: 50%;
+  right: 55px;
+  left: 48px;
+  height: 1px;
+  background: #334763;
+  content: "";
+}
+
+.scenario-source,
+.scenario-wallet {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-height: 68px;
+  place-items: center;
+  align-content: center;
+  border: 1px solid #42536d;
+  border-radius: 10px;
+  color: #dbe7f9;
+  background: #1d2b42;
+}
+
+.scenario-source strong,
+.scenario-wallet strong {
+  font:
+    700 18px/1.1 "Fira Code",
+    Consolas,
+    monospace;
+}
+
+.scenario-source span,
+.scenario-wallet span,
+.scenario-results span {
+  color: #9fb0c8;
+  font-size: 9px;
+}
+
+.scenario-processes {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+}
+
+.scenario-processes span {
+  width: 38px;
+  min-height: 38px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+.scenario-wallet.scenario-node--success {
+  border-color: #31996a;
+  color: #bcf1d6;
+  background: #194735;
+}
+
+.scenario-packet {
+  position: absolute;
+  z-index: 1;
+  top: calc(43px + var(--lane));
+  left: 10%;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  opacity: 0;
+  background: #8bb6ff;
+  box-shadow: 0 0 8px #5791ef;
+}
+
+.scenario-stage--running .scenario-packet {
+  animation: packet-flow 1.55s ease-in-out infinite;
+  animation-delay: var(--delay);
+}
+
+.scenario-stage--passed .scenario-packet {
+  display: none;
+}
+
+.scenario-results {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 5px;
+}
+
+.scenario-results span {
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: #24344d;
+}
+
+.scenario-stage--running .scenario-node--fault {
+  animation: fault-cycle 2.2s ease-in-out infinite;
+}
+
+.scenario-pipeline {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.scenario-pipeline span {
+  min-height: 44px;
+}
+
+.scenario-stage--running .scenario-pipeline span {
+  animation: pipeline-step 2.4s ease-in-out infinite;
+  animation-delay: calc(var(--index, 0) * 120ms);
+}
+
+.scenario-overview {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 32px 1fr 32px 1fr;
+  align-items: center;
+  gap: 6px;
+}
+
+.scenario-overview i {
+  height: 1px;
+  background: #4a6388;
+}
+
+@keyframes arrow-travel {
+  from {
+    left: 0;
+  }
+  to {
+    left: calc(100% - 6px);
+  }
+}
+
+@keyframes node-pulse {
+  50% {
+    border-color: #6f9eea;
+    box-shadow: 0 0 0 4px rgba(87, 145, 239, 0.12);
+  }
+}
+
+@keyframes packet-flow {
+  0% {
+    left: 10%;
+    opacity: 0;
+  }
+  15%,
+  75% {
+    opacity: 1;
+  }
+  55% {
+    left: 52%;
+  }
+  100% {
+    left: 82%;
+    opacity: 0;
+  }
+}
+
+@keyframes fault-cycle {
+  0%,
+  42%,
+  100% {
+    border-color: #42536d;
+  }
+  50%,
+  68% {
+    border-color: #b94a55;
+    color: #ffc7cc;
+    background: #4b252d;
+  }
+}
+
+@keyframes pipeline-step {
+  50% {
+    border-color: #6f9eea;
+    color: #fff;
+    background: #244d99;
+  }
+}
+
+@keyframes event-observed {
+  45% {
+    transform: translateY(-2px) scale(1.035);
+  }
+}
+
 pre {
-  min-height: 570px;
+  min-height: 360px;
   max-height: 70vh;
   overflow: auto;
   margin: 0;
@@ -668,6 +1130,15 @@ pre {
   .button {
     font-size: 14px;
   }
+
+  .scenario-event {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .scenario-event > span {
+    justify-self: start;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -675,6 +1146,12 @@ pre {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .scenario-packet {
+    display: none;
   }
 }
