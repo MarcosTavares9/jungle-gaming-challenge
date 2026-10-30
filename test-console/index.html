@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Jungle Gaming | Test Console</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#suites">Ir para as suítes</a>
+    <header class="topbar">
+      <div class="shell topbar__content">
+        <div class="brand" aria-label="Jungle Gaming Test Console">
+          <span class="brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M4 5h16v4H4zM4 11h10v4H4zM4 17h16v2H4z" />
+            </svg>
+          </span>
+          <div>
+            <strong>Jungle Gaming</strong>
+            <span>Test Console</span>
+          </div>
+        </div>
+        <div class="environment">
+          <span class="environment__dot" aria-hidden="true"></span>
+          Somente local
+        </div>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="hero" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">Evidência executável</p>
+          <h1 id="page-title">Validação do processador de apostas</h1>
+          <p class="hero__copy">
+            Execute os cenários obrigatórios do desafio, acompanhe os logs e
+            confirme as invariantes sem memorizar comandos.
+          </p>
+        </div>
+        <div class="hero__command" aria-label="Comando para abrir este painel">
+          <span>Inicialização</span>
+          <code>bun run test:console</code>
+        </div>
+      </section>
+
+      <section class="summary" aria-label="Resumo da cobertura">
+        <article>
+          <span>Grupos obrigatórios</span>
+          <strong>3</strong>
+          <small>Unidade, integração e concorrência</small>
+        </article>
+        <article>
+          <span>Validação completa</span>
+          <strong>108</strong>
+          <small>Testes na execução de referência</small>
+        </article>
+        <article>
+          <span>Infraestrutura real</span>
+          <strong>3×</strong>
+          <small>Aplicações, PostgreSQL e SQS</small>
+        </article>
+      </section>
+
+      <div class="workspace">
+        <section id="suites" class="suites" aria-labelledby="suites-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Suítes disponíveis</p>
+              <h2 id="suites-title">Escolha o nível de validação</h2>
+            </div>
+            <p
+              id="global-status"
+              class="global-status"
+              role="status"
+              aria-live="polite"
+            >
+              Carregando estado
+            </p>
+          </div>
+          <div id="suite-grid" class="suite-grid"></div>
+        </section>
+
+        <aside class="console" aria-labelledby="console-title">
+          <div class="console__header">
+            <div>
+              <p class="eyebrow">Saída da execução</p>
+              <h2 id="console-title">Console</h2>
+            </div>
+            <div class="console__actions">
+              <button
+                id="copy-output"
+                class="button button--quiet"
+                type="button"
+                disabled
+              >
+                Copiar logs
+              </button>
+            </div>
+          </div>
+          <div id="run-summary" class="run-summary" aria-live="polite">
+            <span class="status status--idle">Aguardando</span>
+            <span>Selecione uma suíte para começar.</span>
+          </div>
+          <pre id="output" tabindex="0" aria-label="Logs da validação">
+Nenhuma execução iniciada.</pre
+          >
+        </aside>
+      </div>
+
+      <section class="evidence" aria-labelledby="evidence-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Rastreabilidade</p>
+            <h2 id="evidence-title">O que cada botão comprova</h2>
+          </div>
+          <p>Mapeamento direto para a seção 13 do enunciado.</p>
+        </div>
+        <div id="evidence-grid" class="evidence-grid"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="shell">
+        <p>
+          Execução restrita a comandos predefinidos e recursos locais isolados.
+        </p>
+        <p>Os resultados permanecem apenas na memória deste processo.</p>
+      </div>
+    </footer>
+
+    <script type="module" src="/app.js?v=3"></script>
+  </body>
+</html>
